@@ -1,0 +1,5 @@
+{
+  "name": "Grok Clone",
+  "description": "A minimalist chat interface featuring Grok, Claude, ChatGPT, DeepSeek, and Gemini models powered by Pollinations AI.",
+  "requestFramePermissions": []
+}

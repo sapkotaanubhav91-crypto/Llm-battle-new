@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grok Clone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              grok: {
+                bg: {
+                  light: '#fdfdfd',
+                  dark: '#141414',
+                },
+                input: {
+                  light: '#f8f8f8',
+                  dark: '#212121',
+                },
+                ring: {
+                  light: '#e5e5e5',
+                  dark: '#2a2a2a',
+                },
+                text: {
+                  light: '#0d0d0d',
+                  dark: '#ffffff',
+                },
+              },
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            borderRadius: {
+              '4xl': '2rem',
+            }
+          },
+        },
+      };
+    </script>
+    <style>
+      /* Custom scrollbar for minimalist look */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #333;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #333;
+      }
+      .light ::-webkit-scrollbar-thumb {
+        background: #ccc;
+      }
+      
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body class="bg-[#fdfdfd] dark:bg-[#141414] text-[#0d0d0d] dark:text-white h-screen overflow-hidden transition-colors duration-200">
+    <div id="root" class="h-full flex flex-col"></div>
+  </body>
+</html>
