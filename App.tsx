@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Composer } from './components/Composer';
 import { ChatMessage } from './components/ChatMessage';
-import { GrokLogo, ChatGPTIcon, ClaudeIcon, DeepSeekIcon, GeminiIcon, SunIcon, MoonIcon, ChevronDownIcon, CpuIcon, ImageIcon, SparklesIcon } from './components/Icons';
+import { GrokLogo, ChatGPTIcon, ClaudeIcon, DeepSeekIcon, GeminiIcon, SunIcon, MoonIcon, ChevronDownIcon, CpuIcon, ImageIcon, SparklesIcon, ScaleIcon, GavelIcon } from './components/Icons';
 import { sendPollinationsMessageStream, getModels, DEFAULT_MODELS } from './services/pollinations';
 import { Message, ModelType, PollinationsModel } from './types';
 
@@ -33,9 +33,22 @@ const GEMINI_SYSTEM_INSTRUCTION = `You are Gemini, a multimodal AI model from Go
 You are designed to be helpful, harmless, and honest.
 You can reason across complex tasks and provide insightful answers.`;
 
+const JUDGE_SYSTEM_INSTRUCTION = `You are the Chief Justice of the AI Council.
+You have received answers from 5 different AI models to a user query.
+Your job is to:
+1. Critically evaluate the answers for accuracy, nuance, and helpfulness.
+2. Select the best one or synthesize a superior answer from them.
+3. Present the final answer clearly to the user.
+Start with "The Council has spoken." and briefly mention whose insight was most valuable before giving the answer.`;
+
+// Models used for comparison and council
+const FLAGSHIP_MODELS = ['openai', 'claude', 'deepseek', 'gemini', 'grok'];
+
 // Mapping for pretty names and icons
 const MODEL_METADATA: Record<string, { name: string; icon: React.FC<any>; systemPrompt?: string }> = {
   'auto': { name: 'Auto (Best for Task)', icon: SparklesIcon },
+  'council': { name: 'LLM Council', icon: GavelIcon },
+  'compare': { name: 'Compare Models', icon: ScaleIcon },
   'grok': { name: 'Grok 2', icon: GrokLogo, systemPrompt: GROK_SYSTEM_INSTRUCTION },
   'openai': { name: 'ChatGPT-4o', icon: ChatGPTIcon, systemPrompt: CHATGPT_SYSTEM_INSTRUCTION },
   'openai-large': { name: 'GPT-4o', icon: ChatGPTIcon, systemPrompt: CHATGPT_SYSTEM_INSTRUCTION },
@@ -60,7 +73,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [activeModel, setActiveModel] = useState<ModelType>('grok');
-  // Initialize with DEFAULT_MODELS to ensure menu is never blank
   const [availableModels, setAvailableModels] = useState<PollinationsModel[]>(DEFAULT_MODELS);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   
@@ -81,7 +93,6 @@ function App() {
       document.documentElement.classList.remove('dark');
     }
 
-    // Close menu handler
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsModelMenuOpen(false);
@@ -89,7 +100,6 @@ function App() {
     };
     document.addEventListener('mousedown', handleClickOutside);
 
-    // Fetch latest models in background and update list
     getModels().then(models => {
       if (models && models.length > 0) {
         setAvailableModels(models);
@@ -120,17 +130,15 @@ function App() {
   const handleModelChange = (model: ModelType) => {
     if (model !== activeModel) {
       setActiveModel(model);
-      setMessages([]); // Clear chat on model switch
+      setMessages([]);
       setIsModelMenuOpen(false);
     }
   };
 
   const getSystemPrompt = (model: ModelType) => {
-    // Check exact match first
     if (MODEL_METADATA[model]?.systemPrompt) {
       return MODEL_METADATA[model].systemPrompt;
     }
-    // Fallback logic
     if (model.includes('grok')) return GROK_SYSTEM_INSTRUCTION;
     if (model.includes('openai')) return CHATGPT_SYSTEM_INSTRUCTION;
     if (model.includes('claude')) return CLAUDE_SYSTEM_INSTRUCTION;
@@ -139,11 +147,8 @@ function App() {
     return undefined;
   };
 
-  // Heuristic to detect best model
   const detectBestModel = (input: string): string => {
     const lower = input.toLowerCase();
-    
-    // Image Generation
     if (
         lower.match(/(draw|generate|create|make).*(image|picture|photo|painting|sketch)/) || 
         lower.startsWith('image of') ||
@@ -151,22 +156,31 @@ function App() {
     ) {
         return 'flux';
     }
-    
-    // Coding / Technical
     if (
         lower.match(/(code|function|script|algorithm|bug|error|exception|stack trace|python|javascript|typescript|react|html|css|sql|json|api)/) ||
         lower.includes('how to fix')
     ) {
-        return 'deepseek'; // DeepSeek is often preferred for coding speed/accuracy in this set
+        return 'deepseek'; 
     }
-    
-    // Complex Reasoning / Writing / Analysis
     if (lower.match(/(explain|summarize|write|essay|story|poem|analysis|compare|difference between|plan)/)) {
-        return 'claude'; // Claude Sonnet is great for writing/reasoning
+        return 'claude'; 
     }
-    
-    // Default / Casual Chat
     return 'grok'; 
+  };
+
+  // Helper to fetch full response (non-streaming for council candidates) with timeout
+  const fetchFullResponse = async (msgs: Message[], model: string, systemPrompt?: string): Promise<string> => {
+    let fullText = "";
+    try {
+        const stream = sendPollinationsMessageStream(msgs, model, systemPrompt, 'text');
+        for await (const chunk of stream) {
+            fullText += chunk;
+        }
+        if (!fullText.trim()) throw new Error("Empty response");
+    } catch (e) {
+        throw e;
+    }
+    return fullText;
   };
 
   const handleSend = async () => {
@@ -184,7 +198,120 @@ function App() {
     setIsLoading(true);
     abortRef.current = false;
 
-    // Determine specific model to use
+    // --- COMPARE MODE ---
+    if (activeModel === 'compare') {
+        const modelsToCompare = FLAGSHIP_MODELS;
+        const newMessages: Message[] = modelsToCompare.map((modelId, index) => ({
+            id: (Date.now() + index + 1).toString(),
+            role: 'model',
+            content: '',
+            timestamp: Date.now(),
+            model: modelId
+        }));
+        
+        setMessages(prev => [...prev, ...newMessages]);
+
+        const promises = modelsToCompare.map(async (modelId, index) => {
+             const msgId = newMessages[index].id;
+             try {
+                const stream = sendPollinationsMessageStream(
+                    [...messages, userMessage], 
+                    modelId, 
+                    getSystemPrompt(modelId),
+                    'text'
+                );
+                
+                let fullContent = '';
+                for await (const chunk of stream) {
+                    if (abortRef.current) break;
+                    fullContent += chunk;
+                    setMessages(prev => prev.map(msg => 
+                        msg.id === msgId ? { ...msg, content: fullContent } : msg
+                    ));
+                }
+             } catch (e) {
+                 setMessages(prev => prev.map(msg => 
+                    msg.id === msgId ? { ...msg, content: "[Error: Connection timed out or failed]" } : msg
+                ));
+             }
+        });
+
+        await Promise.all(promises);
+        setIsLoading(false);
+        return;
+    }
+
+    // --- COUNCIL MODE ---
+    if (activeModel === 'council') {
+        const judgeId = (Date.now() + 1).toString();
+        setMessages(prev => [...prev, {
+            id: judgeId,
+            role: 'model',
+            content: 'The Council is deliberating... (Consulting Grok, OpenAI, Claude, DeepSeek, Gemini)',
+            timestamp: Date.now(),
+            model: 'council'
+        }]);
+
+        try {
+            // 1. Fetch Candidates in parallel with strict 10s timeout per model
+            const fetchWithTimeout = async (m: string) => {
+                const TIMEOUT_MS = 10000;
+                try {
+                    // Create a promise that rejects after timeout
+                    const timeoutPromise = new Promise<string>((_, reject) => 
+                        setTimeout(() => reject(new Error("Timeout")), TIMEOUT_MS)
+                    );
+                    
+                    const response = await Promise.race([
+                        fetchFullResponse([...messages, userMessage], m, getSystemPrompt(m)),
+                        timeoutPromise
+                    ]);
+                    
+                    return { model: m, response };
+                } catch (e) {
+                    return { model: m, response: `[Model ${m} failed to respond in time]` };
+                }
+            };
+            
+            const results = await Promise.all(FLAGSHIP_MODELS.map(m => fetchWithTimeout(m)));
+            
+            // 2. Formulate Judge Prompt
+            let judgePrompt = `User Query: "${userMessage.content}"\n\n`;
+            results.forEach(r => {
+                judgePrompt += `Model ${r.model} Answer:\n${r.response}\n\n----------------\n\n`;
+            });
+            judgePrompt += "Based on these answers, provide the best possible response. Ignore any models that failed to respond.";
+
+            // 3. Stream Judge Response
+            const judgeModel = 'perplexity-fast'; 
+            
+            const stream = sendPollinationsMessageStream(
+                [{ role: 'user', content: judgePrompt, id: 'judge-prompt', timestamp: Date.now() }], 
+                judgeModel, 
+                JUDGE_SYSTEM_INSTRUCTION, 
+                'text'
+            );
+
+            let fullContent = '';
+            for await (const chunk of stream) {
+                if (abortRef.current) break;
+                fullContent += chunk;
+                setMessages(prev => prev.map(msg => 
+                    msg.id === judgeId ? { ...msg, content: fullContent } : msg
+                ));
+            }
+
+        } catch (e) {
+            setMessages(prev => prev.map(msg => 
+                msg.id === judgeId ? { ...msg, content: "The Council was disbanded due to a critical error." } : msg
+            ));
+        } finally {
+            setIsLoading(false);
+        }
+        return;
+    }
+
+    // --- STANDARD / AUTO MODE ---
     let targetModel = activeModel;
     if (activeModel === 'auto') {
         targetModel = detectBestModel(input);
@@ -196,12 +323,10 @@ function App() {
       role: 'model',
       content: '',
       timestamp: Date.now(),
-      model: targetModel // Store the actual model used in the message
+      model: targetModel 
     };
     setMessages(prev => [...prev, aiMessagePlaceholder]);
 
-    // Determine model type for API (image vs text)
-    // Check 'flux' or 'turbo' explicitly, or check metadata
     const modelObj = availableModels.find(m => m.id === targetModel);
     const isImageModel = modelObj?.type === 'image' || targetModel === 'flux' || targetModel === 'turbo';
     const modelType = isImageModel ? 'image' : 'text';
@@ -217,11 +342,9 @@ function App() {
       let fullContent = '';
       for await (const chunk of stream) {
         if (abortRef.current) break;
-        // If image model, chunk is the full markdown or loading text
         if (modelType === 'image' && chunk.startsWith('![')) {
             fullContent = chunk;
         } else if (modelType === 'image') {
-            // Loading state for image
              fullContent = chunk;
         } else {
             fullContent += chunk;
@@ -237,7 +360,7 @@ function App() {
       console.error("Failed to send message", error);
       setMessages(prev => prev.map(msg => 
         msg.id === aiMessageId 
-          ? { ...msg, content: msg.content + "\n[Error generating response. Please try again.]" } 
+          ? { ...msg, content: msg.content + "\n[Error generating response. Please try again later.]" } 
           : msg
       ));
     } finally {
@@ -255,24 +378,20 @@ function App() {
 
   const isEmpty = messages.length === 0;
 
-  // Helper to resolve icon
   const resolveModelIcon = (model: ModelType, className: string) => {
     if (typeof model !== 'string') return <CpuIcon className={className} />;
     
-    // Check metadata first
     const meta = MODEL_METADATA[model];
     if (meta) {
         const Icon = meta.icon;
         return <Icon className={className} />;
     }
     
-    // Check type from availableModels
     const modelObj = availableModels.find(m => m.id === model);
     if (modelObj?.type === 'image') {
         return <ImageIcon className={className} />;
     }
 
-    // Heuristic fallback
     if (model.includes('grok')) return <GrokLogo className={className} />;
     if (model.includes('openai')) return <ChatGPTIcon className={className} />;
     if (model.includes('claude')) return <ClaudeIcon className={className} />;
@@ -282,14 +401,12 @@ function App() {
     return <CpuIcon className={className} />;
   };
 
-  // Helper to resolve name
   const resolveModelName = (model: ModelType) => {
     if (typeof model !== 'string') return 'Unknown';
 
     const meta = MODEL_METADATA[model];
     if (meta) return meta.name;
     
-    // Fallback for dynamic models: format id "some-model-name" -> "Some Model Name"
     return model
       .split(/[-_]/)
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -298,7 +415,6 @@ function App() {
 
   return (
     <div className="flex h-full flex-col bg-[#fdfdfd] px-4 dark:bg-[#141414] transition-colors duration-200">
-      {/* Header / Model Selector */}
       <div className="absolute top-4 left-4 z-50" ref={menuRef}>
         <button 
           onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
@@ -334,7 +450,6 @@ function App() {
         )}
       </div>
 
-      {/* Theme Toggle */}
       <div className="absolute top-4 right-4 z-50">
         <button 
           onClick={() => setIsDarkMode(!isDarkMode)}
